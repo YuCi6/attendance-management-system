@@ -1,71 +1,99 @@
 # attendance_policy.py
 
+import datetime
+
 class AttendancePolicy:
-    def __init__(self, policy_name, max_hours_per_day, min_hours_per_day, overtime_rate):
+    def __init__(self, policy_name, max_hours_per_day, min_hours_per_day, overtime_rate, work_start, work_end):
         self.policy_name = policy_name
         self.max_hours_per_day = max_hours_per_day
         self.min_hours_per_day = min_hours_per_day
         self.overtime_rate = overtime_rate
+        self.work_start = work_start  # format: "09:00"
+        self.work_end = work_end      # format: "18:00"
+        self.holiday_exceptions = []
 
-    def update_policy(self, max_hours=None, min_hours=None, overtime_rate=None):
+    def update_policy(self, max_hours=None, min_hours=None, overtime_rate=None, work_start=None, work_end=None):
         if max_hours is not None:
             self.max_hours_per_day = max_hours
         if min_hours is not None:
             self.min_hours_per_day = min_hours
         if overtime_rate is not None:
             self.overtime_rate = overtime_rate
+        if work_start:
+            self.work_start = work_start
+        if work_end:
+            self.work_end = work_end
+
+    def add_holiday_exception(self, date):
+        self.holiday_exceptions.append(date)
+
+    def is_work_day(self, date):
+        if date.weekday() >= 5 or date in self.holiday_exceptions:
+            return False
+        return True
+
+    def is_valid_check_in(self, check_in_time):
+        start = datetime.datetime.strptime(self.work_start, "%H:%M").time()
+        end = datetime.datetime.strptime(self.work_end, "%H:%M").time()
+        return start <= check_in_time <= end
 
     def __str__(self):
-        return f"{self.policy_name}: Max Hours={self.max_hours_per_day}, Min Hours={self.min_hours_per_day}, Overtime Rate={self.overtime_rate}"
+        return (f"Policy: {self.policy_name} | Work: {self.work_start}-{self.work_end} | "
+                f"Min Hours: {self.min_hours_per_day} | Max Hours: {self.max_hours_per_day} | "
+                f"OT Rate: {self.overtime_rate}")
 
 class AttendanceManager:
     def __init__(self):
         self.policies = {}
 
-    def add_policy(self, policy_name, max_hours, min_hours, overtime_rate):
-        if policy_name in self.policies:
-            raise ValueError(f"Policy {policy_name} already exists.")
-        self.policies[policy_name] = AttendancePolicy(policy_name, max_hours, min_hours, overtime_rate)
+    def add_policy(self, name, max_h, min_h, rate, start, end):
+        if name in self.policies:
+            raise ValueError(f"Policy {name} already exists.")
+        self.policies[name] = AttendancePolicy(name, max_h, min_h, rate, start, end)
 
-    def get_policy(self, policy_name):
-        return self.policies.get(policy_name)
+    def get_policy(self, name):
+        return self.policies.get(name)
 
-    def update_policy(self, policy_name, max_hours=None, min_hours=None, overtime_rate=None):
-        policy = self.get_policy(policy_name)
-        if policy:
-            policy.update_policy(max_hours, min_hours, overtime_rate)
-        else:
-            raise KeyError(f"Policy {policy_name} not found.")
-
-    def list_all_policies(self):
+    def list_policies(self):
         return list(self.policies.values())
 
-    def export_to_dict(self):
-        return {
-            policy_name: {
-                "max_hours": policy.max_hours_per_day,
-                "min_hours": policy.min_hours_per_day,
-                "overtime_rate": policy.overtime_rate,
-            }
-            for policy_name, policy in self.policies.items()
-        }
+    def check_attendance(self, policy_name, date, check_in_time, worked_hours):
+        policy = self.get_policy(policy_name)
+        if not policy:
+            raise ValueError("Policy not found")
 
-    def import_from_dict(self, data):
-        for policy_name, info in data.items():
-            policy = AttendancePolicy(policy_name, info['max_hours'], info['min_hours'], info['overtime_rate'])
-            self.policies[policy_name] = policy
+        if not policy.is_work_day(date):
+            return "No Work Day (Holiday or Weekend)"
+        
+        if not policy.is_valid_check_in(check_in_time):
+            return f"Invalid Check-in Time: Expected between {policy.work_start} and {policy.work_end}"
 
-# Sample usage
+        if worked_hours < policy.min_hours_per_day:
+            return "Insufficient Hours"
+        elif worked_hours > policy.max_hours_per_day:
+            overtime = worked_hours - policy.max_hours_per_day
+            pay = overtime * policy.overtime_rate
+            return f"Overtime: {overtime:.1f} hrs, Extra Pay: ${pay:.2f}"
+        else:
+            return "Attendance OK"
+
+# Example usage
 if __name__ == "__main__":
-    manager = AttendanceManager()
-    manager.add_policy("Full Time", 8, 4, 1.5)
-    manager.add_policy("Part Time", 4, 2, 1.2)
+    mgr = AttendanceManager()
+    mgr.add_policy("Standard", 8, 4, 1.5, "09:00", "18:00")
 
-    print("--- All Policies ---")
-    for policy in manager.list_all_policies():
-        print(policy)
+    policy = mgr.get_policy("Standard")
+    policy.add_holiday_exception(datetime.date(2025, 5, 1))  # Labor Day
 
-    print("\n--- Policy Update ---")
-    manager.update_policy("Full Time", overtime_rate=2)
-    for policy in manager.list_all_policies():
-        print(policy)
+    print("--- Policies ---")
+    for p in mgr.list_policies():
+        print(p)
+
+    # Simulate attendance check
+    result = mgr.check_attendance("Standard", datetime.date(2025, 5, 2),
+                                   datetime.time(9, 15), worked_hours=9)
+    print("\nAttendance Result:", result)
+
+    result2 = mgr.check_attendance("Standard", datetime.date(2025, 5, 1),
+                                    datetime.time(10, 0), worked_hours=6)
+    print("Holiday Check Result:", result2)
